@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { KeyboardLayoutType, Lesson, Stats, LessonLevel, Theme } from './types';
 import { STATIC_LESSONS } from './constants';
@@ -44,12 +43,20 @@ const App: React.FC = () => {
   const [mistakeHistory, setMistakeHistory] = useState<Record<string, number>>({});
   const [completionCounts, setCompletionCounts] = useState<Record<string, number>>({});
 
+  // Auto Advance State
+  const [autoAdvanceTimer, setAutoAdvanceTimer] = useState<number | null>(null);
+
   // Refs
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Filter lessons by level
   const filteredLessons = STATIC_LESSONS.filter(l => l.level === activeLevel);
+
+  // Calculate Progress for Current Level
+  const totalLessonsInLevel = filteredLessons.length;
+  const completedLessonsInLevel = filteredLessons.filter(l => (completionCounts[l.id] || 0) > 0).length;
+  const progressPercent = totalLessonsInLevel > 0 ? (completedLessonsInLevel / totalLessonsInLevel) * 100 : 0;
 
   // Focus management
   useEffect(() => {
@@ -62,6 +69,41 @@ const App: React.FC = () => {
   useEffect(() => {
     audioService.toggle(isSoundEnabled);
   }, [isSoundEnabled]);
+
+  // Auto Advance Logic
+  useEffect(() => {
+    let timer: any;
+
+    if (isFinished) {
+      // Criteria: Speed >= 60 AND Accuracy >= 90
+      const isPerformanceGood = stats.wpm >= 60 && stats.accuracy >= 90;
+      const currentIndex = filteredLessons.findIndex(l => l.id === currentLesson.id);
+      const hasNextLesson = currentIndex !== -1 && currentIndex < filteredLessons.length - 1;
+
+      if (isPerformanceGood && hasNextLesson) {
+        // Start countdown
+        setAutoAdvanceTimer(3);
+        
+        timer = setInterval(() => {
+          setAutoAdvanceTimer((prev) => {
+            if (prev === null) return null;
+            if (prev <= 1) {
+              clearInterval(timer);
+              handleLessonChange(filteredLessons[currentIndex + 1]);
+              return null;
+            }
+            return prev - 1;
+          });
+        }, 1000);
+      }
+    } else {
+      setAutoAdvanceTimer(null);
+    }
+
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [isFinished]); // Run when finished state changes
 
   // Calculate Stats
   const calculateStats = useCallback(() => {
@@ -150,6 +192,7 @@ const App: React.FC = () => {
     setInputValue('');
     setStats({ wpm: 0, accuracy: 100, errors: 0, totalChars: 0, startTime: null });
     setIsFinished(false);
+    setAutoAdvanceTimer(null); // Cancel auto advance if user resets manually
     
     if (fullReset) {
        setMistakeHistory({});
@@ -182,6 +225,7 @@ const App: React.FC = () => {
 
   const handleRemedialLessonClick = async () => {
     setIsLoadingAI(true);
+    setAutoAdvanceTimer(null); // Stop auto advance
     
     const weakKeys = Object.entries(mistakeHistory)
         .sort((a, b) => (b[1] as number) - (a[1] as number))
@@ -274,6 +318,18 @@ const App: React.FC = () => {
           </div>
         </div>
         <div className="flex gap-2 items-center">
+             
+             {/* Theme Toggle Button */}
+             <button
+                onClick={(e) => { e.stopPropagation(); setIsThemePanelOpen(true); }}
+                className="p-2 rounded-full text-[var(--text-dim)] hover:text-[var(--primary)] hover:bg-[var(--bg-main)] transition-colors"
+                title="Temayı Özelleştir"
+             >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M4 2a2 2 0 00-2 2v11a3 3 0 106 0V4a2 2 0 00-2-2H4zm1 14a1 1 0 100-2 1 1 0 000 2zm5-1.757l4.9-4.9a2 2 0 000-2.828L13.485 5.1a2 2 0 00-2.828 0L10 5.757v8.486zM16 18H9.071l6-6H16a2 2 0 012 2v2a2 2 0 01-2 2z" clipRule="evenodd" />
+                </svg>
+             </button>
+
              {/* Sound Toggle */}
              <button
                 onClick={(e) => { e.stopPropagation(); setIsSoundEnabled(!isSoundEnabled); }}
@@ -374,6 +430,28 @@ const App: React.FC = () => {
                          <div className="bg-[var(--bg-main)] px-4 py-1 rounded border border-[var(--text-dim)]/20 text-[var(--text-main)]">Doğruluk: <span className="text-blue-400 font-mono">%{Math.round(stats.accuracy)}</span></div>
                      </div>
 
+                     {/* Progress Bar for Current Level */}
+                     <div className="w-full max-w-md my-2">
+                        <div className="flex justify-between text-xs text-[var(--text-dim)] mb-1 uppercase tracking-wide font-bold">
+                          <span className="capitalize">{activeLevel} Seviyesi İlerleme</span>
+                          <span>{completedLessonsInLevel} / {totalLessonsInLevel}</span>
+                        </div>
+                        <div className="w-full bg-[var(--bg-main)] rounded-full h-3 border border-[var(--text-dim)]/20 overflow-hidden shadow-inner">
+                          <div 
+                            className="bg-[var(--primary)] h-full transition-all duration-1000 ease-out shadow-[0_0_10px_var(--primary)]" 
+                            style={{ width: `${progressPercent}%` }}
+                          ></div>
+                        </div>
+                     </div>
+
+                     {/* Auto Advance Message */}
+                     {autoAdvanceTimer !== null && (
+                        <div className="flex flex-col items-center animate-pulse bg-[var(--primary)]/10 px-4 py-2 rounded-lg border border-[var(--primary)]/20">
+                           <span className="text-[var(--primary)] font-bold">🚀 Mükemmel Performans!</span>
+                           <span className="text-[var(--text-dim)] text-sm">Sonraki derse geçiliyor: <span className="text-[var(--text-main)] font-bold">{autoAdvanceTimer}</span></span>
+                        </div>
+                     )}
+
                      <div className="flex gap-3">
                         <button 
                             onClick={(e) => { e.stopPropagation(); resetLesson(false); }}
@@ -393,7 +471,7 @@ const App: React.FC = () => {
                         )}
                      </div>
                      
-                     {!showRemedialButton && (
+                     {!showRemedialButton && autoAdvanceTimer === null && (
                          <button
                             onClick={(e) => {
                                 e.stopPropagation();
